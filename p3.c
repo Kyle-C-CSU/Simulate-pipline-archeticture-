@@ -207,7 +207,7 @@ int main(int argc, char *argv[]){
     }
     //here we load our first if instruction into pipe line at PC 0
     struct decoded_instruction ins = convert(memory[0]);
-    update_pipeline_registers(); 
+    update_pipeline_registers(); //figure out how to store pipeline_stage[i] before declared.
     while (1) { 
         /*Coded so the next instruction read from file is at PC. If PC changes during carryout_operation() or another operation this 
         should be reflected in the next instruction read*/
@@ -218,7 +218,8 @@ int main(int argc, char *argv[]){
 
         //If we go with my structure we may need a 4th function to decode the next instruction and stage it for the queue.
         struct decoded_instruction ins = convert(next_instruction);
-
+      
+        //replace pipeline_stages[4] with previous and load new_instruction into pipeline_stages[0]
         if(PC<4){
           for(int i=PC;i>0;i--){
             if(i == 1)
