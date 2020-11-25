@@ -30,22 +30,23 @@ int main(int argc, char *argv[]){
 
     //$0 should always contain 0 
     reg[0] = 0;
-    char *binFile = "testdoc.out";            
+    char *binFile = argv[1];            
     // Copy the contents in the input binary file into the memory array.
     // Note that it is 128 data words and 128 instruction words, totaling 256 items in the memory array. 
     // The data segment begins at memory[0] while the text segment begins at memory[128].
     
     FILE *fptr = fopen(binFile,"rb");
     //fscanf(fptr,"%d", &num);
-    fseek(fptr, 512, SEEK_SET);
-    fread(&num, sizeof(int), 1, fptr);
-    
-  
+    //fseek(fptr, 512, SEEK_SET);
+    for(int i = 0; i<256;i++){
+        fread(&memory[i], sizeof(int), 1, fptr);
+        memory[i] = big_end(memory[i]);
+    }
+        
 
     //int r = fread( memory, sizeof(int), 256, binFile);
    
-    /*for(int i=0;i<256;i++)
+    for(int i=0;i<256;i++)
          printf("%d.\t%x\t\n",i,memory[i]);
-         */
-    printf("%d\n", num);
+    //printf("%d\n", num);
 }   
