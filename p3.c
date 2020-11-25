@@ -220,18 +220,22 @@ int main(int argc, char *argv[]){
         struct decoded_instruction ins = convert(next_instruction);
       
         //replace pipeline_stages[4] with previous and load new_instruction into pipeline_stages[0]
-        if(PC<4){
-          for(int i=PC;i>0;i--){
-            if(i == 1)
-              pipeline_stages[1] = ins;
-            pipeline_stages[i] = pipeline_stages[i-1];
+        if(PC<5){
+          for(int i=PC;i>=0;i--){
+            if(i == 0)
+              pipeline_stages[0] = ins;
+            else{
+              pipeline_stages[i] = pipeline_stages[i-1];
+            }
           }
         }
         else{
-          for(int i=5;i>0;i--){
-            if(i == 1)
-              pipeline_stages[1] = ins;
-            pipeline_stages[i] = pipeline_stages[i-1];
+          for(int i=4;i>=0;i--){
+            if(i == 0)
+              pipeline_stages[0] = ins;
+            else{
+              pipeline_stages[i] = pipeline_stages[i-1];
+            }
           }
         }
     
