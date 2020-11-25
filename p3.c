@@ -15,6 +15,23 @@ struct decoded_instruction {
     int rd;
 };
 
+int embedder(int base,int embed,int off){
+  embed = embed << off;
+  base = base | embed;
+
+  return base;
+}
+
+int big_end(int little){
+  int big = 0;
+
+  big = embedder(big,little & 0x000000FF ,24);
+  big = embedder(big,(little & 0x0000FF00) >> 8 ,16);
+  big = embedder(big,(little & 0x00FF0000) >> 16,8);
+  big = embedder(big,(little & 0xFF000000) >> 24,0);
+
+  return big;
+}
 
 int main(int argc, char *argv[]){
     FILE * fp;
@@ -36,6 +53,8 @@ int main(int argc, char *argv[]){
 
         fseek(fp,sizeof(int)*PC,SEEK_SET);
         fread(&next_instruction,sizeof(int),1,fp);
+
+        next_instruction = big_end(next_instruction);
 
         //If we go with my structure we may need a 4th function to decode the next instruction and stage it for the queue.
         decode_instruction(next_instruction, &pipeline_stages);
