@@ -7,14 +7,12 @@ int reg[32], memory[256], PC = 0;
 /*After the instrution is decoded it is bundled into a single struct. Struct decoded_Instruction does not need every field to be initialized
 the initialized fields can be infered from the opcode and the offset. */
 struct decoded_instruction {
-  //is this meant only for Rtype? Where is immidiate?
     int opcode;
     int func_code;
     int offset;
     int rt;
     int rs;
     int rd;
-    //edited section 
     int pc,imm;
 };
 
@@ -26,6 +24,7 @@ struct InsFetch{
   int pc;
   int pc_next;
   int pc4;
+  int active_signals;
 };
 
 struct Execute{
@@ -41,7 +40,7 @@ struct Execute{
   int regRd;
   int aluOp;
   int zero;
-
+  int active_signals;
 
 };
 
@@ -53,16 +52,17 @@ struct Memory{
   int memRead;
   int regRd;
   int pcSrc;
+  int active_signals;
 
 };
 
 struct WriteBack{
-  int memout;
   int aluOut;
   int regRd;
   int wd;
   int wn;
   int regWrite;
+  int active_signals;
 
 };
 
@@ -96,8 +96,7 @@ int big_end(int little){
 }
 
 void initialize(char *input) {
-    //TODO: Set up open statement so it takes arguments from CL
-    //What is CL?
+    //TODO: Set up open statement so it takes arguments from Command Line
     FILE *fp = fopen(input,"rb"); 
     if (input == NULL) {
         perror("ERROR: File either does not exist or could not be opened!\n");
@@ -135,8 +134,32 @@ struct decoded_instruction convert(int binary_instruction) {
     return new_instruction;
 
 }
-
+/*I am going to try to figure out how to do this phase. It seems like it is going to be the most difficult. I am unsure
+how I should go about testing this as all of the stages are highly linked and depend on results and signals from eachother.
+Whenever I can get a compiled test in I will commit my progress. This May take some time */
 void carryout_operations() {
+    /*WB operation start
+    Based on the Instructions control signal (loadword or an R-type instruction) the result could either come from memory or ALU.
+    The relevent control signal is MemtoReg which will have */
+    int memtoReg = (stages.WB.active_signals >> 8) & 1; //this should separate the single bit control signal from the full signal
+
+    //TODO: implement data forwarding.
+    if(memtoReg==1) {
+        //WB data must come from WB_ALUOut
+        //stages.WB.wn = stages.WB.aluOut;
+        printf("Instruction: %x Signal: %d",pipeline_stages[4].func_code,memtoReg);
+
+    } else if(memtoReg == 0) {
+        //WB data must come from WB_memOut
+        //stages.WB.wn = stages.MEM.memout;
+    }
+
+    /*MEM stage start
+    Uses Control Signals memWrite, memRead, memBranch, and memZero. MemZero is generated during the EX phase when branch
+    instructions are executed. */
+    int memWrite = 
+
+
 
 }
 
