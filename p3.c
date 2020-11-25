@@ -8,6 +8,7 @@ int reg[32], dm[128];        //this reg should always contain 0
 the initialized fields can be infered from the opcode and the offset. */
 struct decoded_instruction {
     int opcode;
+    int func_code;
     int offset;
     int rt;
     int rs;
@@ -23,7 +24,7 @@ int main(int argc, char *argv[]){
     int next_instruction;
 
 
-    /*This array will represent our instructions at each stage of the we can simply read in the instruction information from
+    /*This array will represent our instructions at each stage of the pipeline. We can simply read in the instruction information from
     the array and check other stages if we need to do things like writebacks or memory changes */
     struct decoded_instruction pipeline_stages[5];
     //will initialize the file pointer
@@ -51,7 +52,7 @@ int main(int argc, char *argv[]){
 }
 FILE * initialize(char * input) {
     //TODO: Set up open statement so it takes arguments from CL
-    input = fopen("input.out","r"); 
+    input = fopen("input.out","rb"); 
     if (input == NULL) {
         printf("%s","ERROR: File either does not exist or could not be opened!\n");
     }
@@ -61,7 +62,34 @@ FILE * initialize(char * input) {
 
 }
 void decode_instruction(int binary_instruction, struct decoded_instruction * pipe) {
+    int opcode;
+    struct decoded_instruction new_instruction;
+    opcode = binary_instruction | 0xFC000000;  //this is the mask for the first 5 bits of the instruction
 
+    if(opcode==0) {
+        //do r-type decode
+        new_instruction.opcode = 0;
+        int function_code = binary_instruction | 0x3F; //mask for final 6 bits of instruction
+        new_instruction.func_code = function_code;
+        int rs = binary_instruction | 0x03E00000; //mask for rs section
+        new_instruction.rs = rs;
+        int rt = binary_instruction | 0x001F0000; //mask for rt section
+        new_instruction.rt = rt;
+        int rd = binary_instruction | 0x0000F800; //mask for rd section
+        new_instruction.rd;
+
+    } else {
+        //do I-type decode
+        new_instruction.opcode = opcode;
+        int rs = binary_instruction | 0x03E00000; //mask for rs section
+        new_instruction.rs = rs;
+        int rt = binary_instruction | 0x001F0000; //mask for rt section
+        new_instruction.rt = rt;
+        int imm = binary_instruction | 0x0000FFFF; //mask for lower 16 bits
+
+    }
+
+    
 }
 
 void carryout_operations(struct decoded_instruction * pipe) {
