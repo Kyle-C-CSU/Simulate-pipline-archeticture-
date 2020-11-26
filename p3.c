@@ -94,6 +94,36 @@ struct Pipe{
   struct WriteBack WB;
 };
 
+void printIF(struct Pipe p){
+    printf("IF/ID\t\t\tpc:%d\t\tpc_next:%d\tpc4:%d\n",p.IF.pc,p.IF.pc_next,p.IF.pc4);
+}
+
+void printID(struct Pipe p){
+    printf("ID/EX\t\t\trs:%x\trt:%x\timmed:%x\t\trd:%x\t\tpc4:%d\t\top:%x\textend:%x\n",p.ID.rs,p.ID.rt,p.ID.immed,p.ID.rd,p.ID.pc4,p.ID.op,p.ID.extend);
+    
+}
+
+void printEX(struct Pipe p){
+    printf("EX/MEM\t\t\tpc4:%d\t\tbtgt:%x\t\textend:%x\toffset:%x\trd1:%x\t\taluSrc:%x\tfunct:%x\t\trt:%x\trd:%x\t\tregRd:%x\t\taluOp:%x\t\tzero:%d\n",p.EX.pc4,p.EX.btgt,p.EX.extend,p.EX.offset,p.EX.rd1,p.EX.aluSrc,p.EX.funct,p.EX.rt,p.EX.rd,p.EX.regRd,p.EX.aluOp,p.EX.zero);
+}
+
+void printMEM(struct Pipe p){
+    printf("MEM/WB\t\t\tbtgt:%x\t\tbranch:%x\t\tzero:%x\t\tmemout:%x\t\tmemRead:%x\tregRd:%x\t\tpcSrc:%x\n",p.MEM.btgt,p.MEM.branch,p.MEM.zero,p.MEM.memout,p.MEM.memRead,p.MEM.regRd,p.MEM.pcSrc);
+}   
+
+void printWB(struct Pipe p){
+    printf("WB\t\t\taluOut:%d\tregRd:%d\t\twd:%d\t\twn:%d\t\tregWrite:%d\n",p.WB.aluOut,p.WB.regRd,p.WB.wd,p.WB.wn,p.WB.regWrite);
+}
+
+void printstages(struct Pipe p){
+    printf("PC=%d\n",p.IF.pc);
+    printIF(p);
+    printID(p);
+    printEX(p);
+    printMEM(p);
+    printWB(p);
+    printf("___________________________________________________________________________________________________________________\n\n");
+}
 
 struct decoded_instruction pipeline_stages[5];
 struct Pipe stages;
@@ -137,7 +167,7 @@ void initialize(char *input) {
     for(int i = 0; i<256;i++){
         fread(&memory[i], sizeof(int), 1, fp);
         memory[i] = big_end(memory[i]);
-        printf("%d: %x\n",i,memory[i]);
+        //printf("%d: %x\n",i,memory[i]);
     }
 
     
@@ -221,6 +251,7 @@ void update_pipeline_registers() {
   //IF
   stages.IF.pc = pipeline_stages[0].pc;
   stages.IF.pc4 = pipeline_stages[0].pc+1;
+  //printIF(stages);
   //stages.IF.pc_next; is this not the same as pc4?
   //ID
   stages.ID.op = pipeline_stages[1].opcode;
@@ -246,6 +277,7 @@ void update_pipeline_registers() {
   //stages.EX.regRd = pipeline_stages[2].regRd;
   //stages.EX.aluOp = which aluOp is this aluOp0 or aluOp1 
   //stages.EX.zero = need to determine how to set zero flag 
+  //printEX(stages);
   //MEM
   stages.MEM.active_signals = getActiveSig(pipeline_stages[3].opcode);
   //stages.MEM.btgt = ?
@@ -263,6 +295,8 @@ void update_pipeline_registers() {
   //stages.WB.wd =
   //stages.WB.wn =
   stages.WB.regWrite = stages.WB.active_signals.regWrite;
+
+  printstages(stages);
 
    
 
