@@ -15,7 +15,7 @@ struct decoded_instruction {
     int rs;
     int rd;
     //edited section 
-    int pc,imm;
+    int pc,imm,ins;
 };
 
 struct ControlSig{
@@ -40,6 +40,7 @@ struct InsDecode{
 
 struct InsFetch{
   int pc;
+  int ins;
   int pc_next;
   int pc4;
 
@@ -95,28 +96,28 @@ struct Pipe{
 };
 
 void printIF(struct Pipe p){
-    printf("IF/ID\t\t\tpc:%d\t\tpc_next:%d\tpc4:%d\n",p.IF.pc,p.IF.pc_next,p.IF.pc4);
+    printf("IF/ID(pc,ins,pc_next,pc4)\t\t\t%d\t%d\t%d\t%d\n",p.IF.pc,p.IF.ins,p.IF.pc_next,p.IF.pc4);
 }
 
 void printID(struct Pipe p){
-    printf("ID/EX\t\t\trs:%x\trt:%x\timmed:%x\t\trd:%x\t\tpc4:%d\t\top:%x\textend:%x\n",p.ID.rs,p.ID.rt,p.ID.immed,p.ID.rd,p.ID.pc4,p.ID.op,p.ID.extend);
+    printf("ID/EX(rs,rt,immed,rd,pc4,op,extend)\t\t\t%x\t%x\t%x\t%x\t%d\t%x\t%x\n",p.ID.rs,p.ID.rt,p.ID.immed,p.ID.rd,p.ID.pc4,p.ID.op,p.ID.extend);
     
 }
 
 void printEX(struct Pipe p){
-    printf("EX/MEM\t\t\tpc4:%d\t\tbtgt:%x\t\textend:%x\toffset:%x\trd1:%x\t\taluSrc:%x\tfunct:%x\t\trt:%x\trd:%x\t\tregRd:%x\t\taluOp:%x\t\tzero:%d\n",p.EX.pc4,p.EX.btgt,p.EX.extend,p.EX.offset,p.EX.rd1,p.EX.aluSrc,p.EX.funct,p.EX.rt,p.EX.rd,p.EX.regRd,p.EX.aluOp,p.EX.zero);
+    printf("EX/MEM(pc4,btgt,extend,offset,rd1,aluSrc,rt,rd,regRd,aluOp,zero)\t\t\t%d\t%x\t%x\t%x\t%x\t%x\t%x\t%x\t%x\t%x\t%x\t%d\n",p.EX.pc4,p.EX.btgt,p.EX.extend,p.EX.offset,p.EX.rd1,p.EX.aluSrc,p.EX.funct,p.EX.rt,p.EX.rd,p.EX.regRd,p.EX.aluOp,p.EX.zero);
 }
 
 void printMEM(struct Pipe p){
-    printf("MEM/WB\t\t\tbtgt:%x\t\tbranch:%x\t\tzero:%x\t\tmemout:%x\t\tmemRead:%x\tregRd:%x\t\tpcSrc:%x\n",p.MEM.btgt,p.MEM.branch,p.MEM.zero,p.MEM.memout,p.MEM.memRead,p.MEM.regRd,p.MEM.pcSrc);
+    printf("MEM/WB(btgt,branch,zero,memout,regRd,pcSrc)\t\t\t%x\t%x\t%x\t%x\t%x\t%x\t%x\n",p.MEM.btgt,p.MEM.branch,p.MEM.zero,p.MEM.memout,p.MEM.memRead,p.MEM.regRd,p.MEM.pcSrc);
 }   
 
 void printWB(struct Pipe p){
-    printf("WB\t\t\taluOut:%d\tregRd:%d\t\twd:%d\t\twn:%d\t\tregWrite:%d\n",p.WB.aluOut,p.WB.regRd,p.WB.wd,p.WB.wn,p.WB.regWrite);
+    printf("WB(aluOut,regRd,wd,wn,regWrite)\t\t\t%d\t%d\t%d\t%d\t%d\n",p.WB.aluOut,p.WB.regRd,p.WB.wd,p.WB.wn,p.WB.regWrite);
 }
 
 void printstages(struct Pipe p){
-    printf("PC=%d\n",p.IF.pc);
+    //printf("PC=%d\n",p.IF.pc);
     printIF(p);
     printID(p);
     printEX(p);
@@ -176,6 +177,7 @@ void initialize(char *input) {
 struct decoded_instruction convert(int binary_instruction) {
     int opcode;
     struct decoded_instruction new_instruction;
+    new_instruction.ins = binary_instruction;
     new_instruction.opcode = binary_instruction | 0xFC000000;  //this is the mask for the first 5 bits of the instruction
 
     if(new_instruction.opcode == 0) {
@@ -250,6 +252,7 @@ void carryout_operations() {
 void update_pipeline_registers() {
   //IF
   stages.IF.pc = pipeline_stages[0].pc;
+  stages.IF.ins = pipeline_stages[0].ins;
   stages.IF.pc4 = pipeline_stages[0].pc+1;
   //printIF(stages);
   //stages.IF.pc_next; is this not the same as pc4?
@@ -269,9 +272,9 @@ void update_pipeline_registers() {
   //stages.EX.btgt = still dont know what this is 
   stages.EX.extend = signExtension(pipeline_stages[2].imm);
   stages.EX.offset = signExtension(pipeline_stages[2].imm) << 2;
-  //stages.EX.rd1 = 
+  stages.EX.rd1 = pipeline_stages[2].rs;
   stages.EX.aluSrc = stages.EX.active_signals.aluSrc;
-  //stages.EX.funct = 
+  stages.EX.funct = pipeline_stages[2].func_code;
   stages.EX.rt = pipeline_stages[2].rt;
   stages.EX.rd = pipeline_stages[2].rd;
   //stages.EX.regRd = pipeline_stages[2].regRd;
@@ -296,15 +299,23 @@ void update_pipeline_registers() {
   //stages.WB.wn =
   stages.WB.regWrite = stages.WB.active_signals.regWrite;
 
-  printstages(stages);
+  //printstages(stages);
 
    
 
 
 
 }
-void print_results() {
-
+void print_results(struct Pipe p) {
+    printf("PC = %d\n",p.IF.pc);
+    printf("DM\t\t\t");
+    for(int i=0;i<16;i++)
+        printf("%x\t",memory[i]);
+    printf("\nRegFile\t\t\t");
+    for(int i=0;i<16;i++)
+        printf("%x\t",reg[i]);
+    printf("\n");
+    printstages(p);
 }
 
 
@@ -354,7 +365,7 @@ int main(int argc, char *argv[]){
         update_pipeline_registers(); 
         carryout_operations();
         
-        print_results();
+        print_results(stages);
         
         /*
         if (IF_inst = 12) cycles_to_halt = 4;
