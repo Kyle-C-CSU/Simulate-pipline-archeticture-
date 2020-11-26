@@ -18,15 +18,34 @@ struct decoded_instruction {
     int pc,imm;
 };
 
+struct ControlSig{
+    int regDst;
+    int aluSrc;
+    int memtoReg;
+    int regWrite;
+    int memRead;
+    int memWrite;
+    int branch;
+    int aluOp1;
+    int aluOp0;
+    int branchNe;
+    int jump;
+
+};
+
 struct InsDecode{
   int rs,rt,immed,rd,pc4,op,extend;
+  struct ControlSig active_signals;
 };
 
 struct InsFetch{
   int pc;
   int pc_next;
   int pc4;
+
 };
+
+
 
 struct Execute{
   int pc4;
@@ -40,8 +59,8 @@ struct Execute{
   int rd;
   int regRd;
   int aluOp;
-  int zero;
-
+  int zero; 
+  struct ControlSig active_signals;
 
 };
 
@@ -53,16 +72,17 @@ struct Memory{
   int memRead;
   int regRd;
   int pcSrc;
+  struct ControlSig active_signals;
 
 };
 
 struct WriteBack{
-  int memout;
   int aluOut;
   int regRd;
   int wd;
   int wn;
   int regWrite;
+  struct ControlSig active_signals;
 
 };
 
@@ -73,6 +93,7 @@ struct Pipe{
   struct Memory MEM;
   struct WriteBack WB;
 };
+
 
 struct decoded_instruction pipeline_stages[5];
 struct Pipe stages;
@@ -93,6 +114,15 @@ int big_end(int little){
   big = embedder(big,(little & 0xFF000000) >> 24,0);
 
   return big;
+}
+
+int signExtension(int instr) {
+    int value = (0x0000FFFF & instr);
+    int mask = 0x00008000;
+    if (mask & instr) {
+        value += 0xFFFF0000;
+    }
+    return value;
 }
 
 void initialize(char *input) {
@@ -136,6 +166,53 @@ struct decoded_instruction convert(int binary_instruction) {
 
 }
 
+struct ControlSig getActiveSig(int opcode){
+    int active_signals =0;
+    
+    switch(opcode){
+        //rtype
+        case 0: 
+            active_signals = 1416;
+            break;
+        //addi
+        case 8:
+            active_signals = 896;
+            break;
+        //lw
+        case 35:
+            active_signals = 704;
+            break;
+        //sw
+        case 43:
+            active_signals = 544;
+            break;
+        //beq
+        case 4:
+            active_signals = 20;
+            break;
+        //bne
+        case 5:
+            active_signals = 6;
+            break;
+        //default:
+            //printf("passed unkown opcode value %d",opcode);
+
+    }
+    struct ControlSig returntype;
+    returntype.regDst = (active_signals >> 10) & 1;
+    returntype.aluSrc = (active_signals >> 9) & 1;
+    returntype.memtoReg = (active_signals >> 8) & 1;
+    returntype.regWrite = (active_signals >> 7) & 1;
+    returntype.memRead = (active_signals >> 6) & 1;
+    returntype.memWrite = (active_signals >> 5) & 1;
+    returntype.branch = (active_signals >> 4) & 1;
+    returntype.aluOp1 = (active_signals >> 3) & 1;
+    returntype.aluOp0 = (active_signals >> 2) & 1;
+    returntype.branchNe = (active_signals >> 1) & 1;
+    returntype.jump = (active_signals >> 0) & 1;
+    return returntype;
+}
+
 void carryout_operations() {
 
 }
@@ -146,41 +223,48 @@ void update_pipeline_registers() {
   stages.IF.pc4 = pipeline_stages[0].pc+1;
   //stages.IF.pc_next; is this not the same as pc4?
   //ID
+  stages.ID.op = pipeline_stages[1].opcode;
+  stages.ID.active_signals = getActiveSig(stages.ID.op);
   stages.ID.rs = pipeline_stages[1].rs;
   stages.ID.rt = pipeline_stages[1].rt;
   stages.ID.rd = pipeline_stages[1].rd;
   stages.ID.rd = pipeline_stages[1].imm;
-  stages.ID.op = pipeline_stages[1].opcode;
   stages.ID.pc4 = pipeline_stages[1].pc+1;
-  //stages.ID.extend = pipeline_stages[1] figure out how to store extend
+  stages.ID.active_signals = getActiveSig(pipeline_stages[1].opcode);
+  stages.ID.extend = signExtension(pipeline_stages[1].imm);
   //EXE
+  stages.EX.active_signals = getActiveSig(pipeline_stages[2].opcode); 
   stages.EX.pc4 = pipeline_stages[2].pc+1;
-  //stages.EX.btgt = 
-  //stages.EX.extend =
-  //stages.EX.offset = 
+  //stages.EX.btgt = still dont know what this is 
+  stages.EX.extend = signExtension(pipeline_stages[2].imm);
+  stages.EX.offset = signExtension(pipeline_stages[2].imm) << 2;
   //stages.EX.rd1 = 
-  //stages.EX.aluSrc =
+  stages.EX.aluSrc = stages.EX.active_signals.aluSrc;
   //stages.EX.funct = 
   stages.EX.rt = pipeline_stages[2].rt;
   stages.EX.rd = pipeline_stages[2].rd;
   //stages.EX.regRd = pipeline_stages[2].regRd;
-  //stages.EX.aluOp = 
-  //stages.EX.zero 
+  //stages.EX.aluOp = which aluOp is this aluOp0 or aluOp1 
+  //stages.EX.zero = need to determine how to set zero flag 
   //MEM
-  //stages.MEM.btgt =
-  //stages.MEM.zero =
-  //stages.MEM.regRd = pipeline_stages[3].regRd;
-  //stages.MEM.memout = 
-  //stages.MEM.memRead =
-  //stages.MEM.pcSrc =
-  //stages.MEM.branch = 
+  stages.MEM.active_signals = getActiveSig(pipeline_stages[3].opcode);
+  //stages.MEM.btgt = ?
+  //stages.MEM.zero = ?
+  //stages.MEM.regRd = this could be rd1 or rd2.
+  //stages.MEM.memout = memout is not a control sig could be the value memory is writing back 
+  stages.MEM.memRead = stages.MEM.active_signals.memRead;
+  //stages.MEM.pcSrc = I think this is supposed to be branch signal 
+  stages.MEM.branch = stages.MEM.active_signals.branch; 
   //WB
-  //stages.WB.memout = 
-  //stages.WB.aluOut =
-  //stages.WB.regRD =
+  stages.WB.active_signals = getActiveSig(pipeline_stages[4].opcode); 
+  //stages.WB.memout = ?
+  //stages.WB.aluOut = ?
+  //stages.WB.regRD = ?
   //stages.WB.wd =
   //stages.WB.wn =
-  //stages.WB.regWrite =  
+  stages.WB.regWrite = stages.WB.active_signals.regWrite;
+
+   
 
 
 
@@ -201,13 +285,8 @@ int main(int argc, char *argv[]){
     the array and check other stages if we need to do things like writebacks or memory changes */
     
     //will initialize the file pointer
-    initialize("rtype.out");
-    if(memory[0] ){
-      PC = 128;
-    }
-    //here we load our first if instruction into pipe line at PC 0
-    struct decoded_instruction ins = convert(memory[0]);
-    update_pipeline_registers(); //figure out how to store pipeline_stage[i] before declared.
+    initialize("rtype.out"); //should be argv1
+    
     while (1) { 
         /*Coded so the next instruction read from file is at PC. If PC changes during carryout_operation() or another operation this 
         should be reflected in the next instruction read*/
@@ -218,25 +297,29 @@ int main(int argc, char *argv[]){
 
         //If we go with my structure we may need a 4th function to decode the next instruction and stage it for the queue.
         struct decoded_instruction ins = convert(next_instruction);
-      
+        
         //replace pipeline_stages[4] with previous and load new_instruction into pipeline_stages[0]
-        if(PC<4){
-          for(int i=PC;i>0;i--){
-            if(i == 1)
-              pipeline_stages[1] = ins;
-            pipeline_stages[i] = pipeline_stages[i-1];
+        if(PC<5){
+          for(int i=PC;i>=0;i--){
+            if(i == 0)
+              pipeline_stages[0] = ins;
+            else{
+              pipeline_stages[i] = pipeline_stages[i-1];
+            }
           }
         }
         else{
-          for(int i=5;i>0;i--){
-            if(i == 1)
-              pipeline_stages[1] = ins;
-            pipeline_stages[i] = pipeline_stages[i-1];
+          for(int i=4;i>=0;i--){
+            if(i == 0)
+              pipeline_stages[0] = ins;
+            else{
+              pipeline_stages[i] = pipeline_stages[i-1];
+            }
           }
         }
-    
-        carryout_operations();
         update_pipeline_registers(); 
+        carryout_operations();
+        
         print_results();
         
         /*
