@@ -14,10 +14,11 @@ struct decoded_instruction {
     int rs;
     int rd;
     int pc,imm;
+    int signal;
 };
 
 struct InsDecode{
-  int rs,rt,immed,rd,pc4,op,extend;
+  int rs,rt,immed,rd,pc4,extend,decRD1,decRD2,active_signals,ins;
 };
 
 struct InsFetch{
@@ -25,6 +26,7 @@ struct InsFetch{
   int pc_next;
   int pc4;
   int active_signals;
+  int ins;
 };
 
 struct Execute{
@@ -33,14 +35,17 @@ struct Execute{
   int extend;
   int offset;
   int rd1;
+  int rd2;
   int aluSrc;
   int funct;
   int rt;
   int rd;
   int regRd;
-  int aluOp;
+  //int aluOp; may not need to be tracked
   int zero;
   int active_signals;
+  int regDst;
+  int ALUout;
 
 };
 
@@ -52,8 +57,10 @@ struct Memory{
   int memRead;
   int regRd;
   int pcSrc;
-  int active_signals;
-
+  int active_signals;  
+  int WD;  //added Write Data bus
+  int memWrite;
+  int memALUout; //added ALU out
 };
 
 struct WriteBack{
@@ -63,6 +70,8 @@ struct WriteBack{
   int wn;
   int regWrite;
   int active_signals;
+  int memtoReg;
+  int WDMemOut;
 
 };
 
@@ -109,26 +118,88 @@ void initialize(char *input) {
         printf("%d: %x\n",i,memory[i]);
     }
 
+    //Initializing WB to zero
+    stages.WB.WDMemOut = 0;
+    stages.WB.aluOut = 0;
+    stages.WB.regRd = 0;
+    stages.WB.active_signals = 0;
     
+    //Initializing Mem to zero
+    stages.MEM.btgt = 0;
+    stages.MEM.zero = 0;
+    stages.MEM.memALUout = 0;
+    stages.MEM.WD = 0;
+    stages.MEM.regRd = 0;
+    stages.MEM.active_signals = 0;
+    
+    //Initializing EX to zero
+    stages.EX.pc4 = 0;
+    stages.EX.rd1 = 0;
+    stages.EX.rd2 = 0;
+    stages.EX.extend = 0;
+    stages.EX.rt = 0;
+    stages.EX.rd = 0;
+    stages.EX.active_signals = 0;
+    
+    //Initializing ID to zero
+    stages.ID.pc4 = 0;
+    stages.ID.ins = 0;
+}
+
+int getActiveSig(int opcode){
+    int active_signals =0;
+    switch(opcode){
+        //rtype
+        case 0: 
+            active_signals = 1416;
+            break;
+        //addi
+        case 8:
+            active_signals = 896;
+            break;
+        //lw
+        case 35:
+            active_signals = 704;
+            break;
+        //sw
+        case 43:
+            active_signals = 544;
+            break;
+        //beq
+        case 4:
+            active_signals = 20;
+            break;
+        //bne
+        case 5:
+            active_signals = 6;
+            break;
+        //default:
+            //printf("passed unkown opcode value %d",opcode);
+    }
+    return active_signals;
 }
 
 struct decoded_instruction convert(int binary_instruction) {
-    int opcode;
+    int BigInstruction = big_end(binary_instruction);
     struct decoded_instruction new_instruction;
-    new_instruction.opcode = binary_instruction | 0xFC000000;  //this is the mask for the first 5 bits of the instruction
+    new_instruction.opcode = (BigInstruction >> 26) & 0x3F; //this is the mask for the first 5 bits of the instruction
+    new_instruction.signal = getActiveSig(new_instruction.opcode);
 
     if(new_instruction.opcode == 0) {
         //do r-type decode
-        new_instruction.func_code = binary_instruction | 0x3F; //mask for final 6 bits of instruction
-        new_instruction.rs = binary_instruction | 0x03E00000; //mask for rs section
-        new_instruction.rt  = binary_instruction | 0x001F0000; //mask for rt section
-        new_instruction.rd = binary_instruction | 0x0000F800; //mask for rd section
+        new_instruction.func_code = BigInstruction & 0x3F; //mask for final 6 bits of instruction
+        new_instruction.rs = (BigInstruction >> 21) & 0x1F; //mask for rs section
+        new_instruction.rt  = (BigInstruction >> 16) & 0x1F; //mask for rt section
+        new_instruction.rd = (BigInstruction >> 11) & 0x1F; //mask for rd section
+        new_instruction.imm = 0; 
         
     } else {
         //do I-type decode
-        new_instruction.rs = binary_instruction | 0x03E00000; //mask for rs section
-        new_instruction.rt = binary_instruction | 0x001F0000; //mask for rt section
-        int imm = binary_instruction | 0x0000FFFF; //mask for lower 16 bits    
+        new_instruction.rs = (BigInstruction >> 21) & 0x1F; //mask for rs section
+        new_instruction.rt  = (BigInstruction >> 16) & 0x1F; //mask for rt section
+        new_instruction.imm =  (BigInstruction >> 16) & 0xFFFF; //mask for lower 16 bits    
+        new_instruction.rd = 0;
+
     }
     new_instruction.pc = PC-1;
     return new_instruction;
@@ -141,129 +212,194 @@ void carryout_operations() {
     /*WB Stage Start
     Based on the Instructions control signal (loadword or an R-type instruction) the result could either come from memory or ALU.
     The relevent control signal is MemtoReg which will have */
-    int memtoReg = (stages.WB.active_signals >> 8) & 1; //this should separate the single bit control signal from the full signal
+    stages.WB.memtoReg = (stages.WB.active_signals >> 8) & 1; //this should separate the single bit control signal from the full signal
 
-    if(memtoReg==1) {
+    stages.WB.regWrite = (stages.WB.active_signals >> 7) & 1;
+
+    if(stages.WB.memtoReg==1) {
         //WB data must come from WB_ALUOut
         stages.WB.wn = stages.WB.aluOut;
+        reg[stages.WB.regRd] = stages.WB.aluOut;
         
 
-    } else if(memtoReg == 0) {
+    } else if(stages.WB.memtoReg == 0) {
         //WB data must come from WB_memOut
         stages.WB.wn = stages.MEM.memout;
+        reg[stages.WB.regRd] = stages.MEM.memout;
     }
+
+    /*Mem Stage Start
+    The Mem operation is going to be determined by 4 signals MEM_Branch, MEM_Zero, MEM_Write, and MEM_Read. MEM_Branch and ZERO are AND
+    to confirm a program branch. */
+    // (MEM_Branch && MEM_Zero) || (MEM_BranchNE && MEM_Zero)
+    stages.MEM.branch = ((stages.MEM.active_signals >> 1) & 1) || ((stages.MEM.active_signals >> 1) & 1);
+    stages.MEM.pcSrc = (stages.MEM.branch && stages.MEM.zero);
+    stages.MEM.memRead = (stages.MEM.active_signals >> 5) & 1;
+    stages.MEM.memWrite = (stages.MEM.active_signals >> 6) & 1;
+    if(stages.MEM.memRead == 1) {
+        stages.MEM.memout = memory[stages.MEM.memALUout/4];
+    } else if(stages.MEM.memWrite == 1) {
+        memory[stages.MEM.memALUout/4] = stages.MEM.WD;
+    }
+    
+    
+
 
     /*EX Stage Start
     The ALU operation is going to be determined by the whole Signal Int. This is because EVERY instruction is going to be relevent in
     this stage. It will not be too complicated though. */
 
+    stages.EX.regDst = (stages.EX.active_signals >> 10) & 1;
+    stages.EX.aluSrc = (stages.EX.active_signals >> 9) & 1;
 
-    /*We are going to have to determine a way to get the function code from the instruction at this stage. We can decide on it the next
-    time we speak. I have left a placeholder for compilation concerns. */
-    int function_code_placeholder; 
+    if(stages.EX.regDst == 1) {
 
-    /*This is also going to have to come from the Instruction. We are going to have to decide on a way to assign the data in
-    the instruction to the variables rs, rt, rd. */
-    int rs;
-    int rt;
-    int rd;
-    int EX_ALUOut; /*I couldn't find anything about ALU_OUT in the documentation. It needs to be printed and it is an important signal
-    for the ALU but it needs to be at least 4 differt values instead of the regular 0 or 1. */
+        stages.EX.regRd = stages.EX.rd;
+
+    } else if(stages.EX.regDst == 1) {
+
+        stages.EX.regRd = stages.EX.rt;
+    }
 
     if(stages.EX.active_signals == 1416) { //This block is responsible for setting the R-Type Instruction signals for EX stage.
-        switch (function_code_placeholder)
+        switch (stages.EX.funct)
         {
-        case 32:  //If it is a ADD instruction EX_ALUOut is 1.
-            EX_ALUOut = 1;
+        case 32:  //If it is a ADD instruction
+            stages.EX.ALUout = stages.EX.rd1 + stages.EX.rd2;
             break;
 
         case 34:  //If it is a SUB instruction EX_ALUOut is 2
-            EX_ALUOut = 2;
+            stages.EX.ALUout = stages.EX.rd1 - stages.EX.rd2;
             break;
 
         case 42: //If it is a SLT instruction ALU_C
-            EX_ALUOut = 3;
+            if (stages.EX.rd1 < stages.EX.rd2) stages.EX.ALUout = 1;
+            else stages.EX.ALUout = 0;
             break;
         
         case 12: //If it is this signal then it is the HALT instruction
-            EX_ALUOut = 0; 
+            stages.EX.ALUout = 0; 
             break;
         }
     }
-    else if(stages.EX.active_signals == 20 || stages.EX.active_signals == 6) EX_ALUOut = 0; //Signals a Branch instruction
+    else if(stages.EX.active_signals == 20 || stages.EX.active_signals == 6) {
+        stages.EX.zero = 1;
+        stages.EX.offset = stages.EX.extend << 2;
+        stages.EX.btgt = stages.EX.offset + stages.EX.pc4;
+    } //Signals a Branch instruction
         
     //Signals a LW or SW instruction
-    else if ((stages.EX.active_signals==704) || (stages.EX.active_signals==544) || (stages.EX.active_signals==896)) EX_ALUOut = 4;
+    else if ((stages.EX.active_signals==704) || (stages.EX.active_signals==544) || (stages.EX.active_signals==896)) {
+        stages.EX.ALUout = stages.EX.extend + stages.EX.rd1;
+    }
+
+    /*Instruction Decode phase
+    I have opt to do the decode directly in the carryout_operations function. It simply makes the pipeline function much smoother.
+    There is only one signal that matters in this stage and it is RegWrite from the WB stage. */
+    struct decoded_instruction decoded_ins = convert(stages.ID.ins);
+    stages.ID.rs = decoded_ins.rs;
+    stages.ID.rt = decoded_ins.rt;
+    stages.ID.rd = decoded_ins.rd;
+    stages.ID.immed = decoded_ins.imm;
+    stages.ID.active_signals = decoded_ins.signal;
+    stages.ID.decRD1 = reg[stages.ID.rs];
+    stages.ID.decRD2 = reg[stages.ID.rt];
+
+
 
     /*IF Stage Start
     All of the signals required for this stage are generated by the MEM stage. They are MEM_Zero, MEM_Branch (For BEQ), MEM_BranchNE(For BNE)
     all of which are checked to generate signal MEM_PCSrc determining if the next instruction is PC + 4 or an adress determined by branch
     instruction */
-    int MEM_Zero = 0; //this is suppose to change however I have decided to keep it zero for testing
-    int MEM_Branch = (stages.MEM.active_signals >> 4) & 1;
-    int MEM_BranchNE = (stages.MEM.active_signals >> 1) & 1;
-    int MEM_PCSrc = (MEM_Branch && MEM_Zero) || (MEM_BranchNE && MEM_Zero);
-
-    if(MEM_PCSrc == 1) {  //branch instruction 
+    //int MEM_Branch = (stages.MEM.active_signals >> 4) & 1;
+    //int MEM_BranchNE = (stages.MEM.active_signals >> 1) & 1;
+    
+    stages.IF.pc4 = PC + 4;
+    if(stages.MEM.pcSrc == 1) {  //branch instruction 
 
         stages.IF.pc_next = stages.MEM.btgt; //takes the result of the memory stage ALU and makes it instruction adress
 
-    } else if(MEM_PCSrc == 0) {  
+    } else if(stages.MEM.pcSrc == 0) {  
 
-        stages.IF.pc_next = PC + 4;  //if MEM_PCSrc there is no branch instruction so PC + 4
+        stages.IF.pc_next = stages.IF.pc4;  //if MEM_PCSrc there is no branch instruction so PC + 4
+    
 
     }
+    stages.IF.ins = memory[stages.IF.pc_next/4];
+    PC = PC + 4;
 
 
 }
 
 void update_pipeline_registers() {
+
+//WB
+  stages.WB.WDMemOut = stages.MEM.memout;
+  stages.WB.aluOut = stages.MEM.memALUout;
+  stages.WB.regRd = stages.MEM.regRd;
+  stages.WB.active_signals = stages.MEM.active_signals;
+
+//MEM
+  stages.MEM.btgt = stages.EX.btgt;
+  stages.MEM.zero = stages.EX.zero;
+  stages.MEM.regRd = stages.EX.regRd;
+  stages.MEM.memALUout = stages.EX.ALUout;
+  stages.MEM.WD = stages.EX.rd2;
+  stages.MEM.regRd = stages.EX.regRd;
+  stages.MEM.active_signals = stages.EX.active_signals;
+
+//EXE
+  stages.EX.pc4 = stages.ID.pc4;
+  stages.EX.rd1 = stages.ID.decRD1;
+  stages.EX.rd2 = stages.ID.decRD2;
+  stages.EX.extend = stages.ID.immed;
+  stages.EX.rt = stages.ID.rd;
+  stages.EX.rd = stages.ID.rd;
+  stages.EX.active_signals = stages.ID.active_signals;
+
+//ID
+  stages.ID.pc4 = stages.IF.pc4;
+  stages.ID.ins = stages.IF.ins;
+
   //IF
   stages.IF.pc = pipeline_stages[0].pc;
   stages.IF.pc4 = pipeline_stages[0].pc+1;
-  //stages.IF.pc_next; is this not the same as pc4?
-  //ID
-  stages.ID.rs = pipeline_stages[1].rs;
-  stages.ID.rt = pipeline_stages[1].rt;
-  stages.ID.rd = pipeline_stages[1].rd;
-  stages.ID.rd = pipeline_stages[1].imm;
-  stages.ID.op = pipeline_stages[1].opcode;
-  stages.ID.pc4 = pipeline_stages[1].pc+1;
-  //stages.ID.extend = pipeline_stages[1] figure out how to store extend
-  //EXE
-  stages.EX.pc4 = pipeline_stages[2].pc+1;
-  //stages.EX.btgt = 
-  //stages.EX.extend =
-  //stages.EX.offset = 
-  //stages.EX.rd1 = 
-  //stages.EX.aluSrc =
-  //stages.EX.funct = 
-  stages.EX.rt = pipeline_stages[2].rt;
-  stages.EX.rd = pipeline_stages[2].rd;
-  //stages.EX.regRd = pipeline_stages[2].regRd;
-  //stages.EX.aluOp = 
-  //stages.EX.zero 
-  //MEM
-  //stages.MEM.btgt =
-  //stages.MEM.zero =
-  //stages.MEM.regRd = pipeline_stages[3].regRd;
-  //stages.MEM.memout = 
-  //stages.MEM.memRead =
-  //stages.MEM.pcSrc =
-  //stages.MEM.branch = 
-  //WB
-  //stages.WB.memout = 
-  //stages.WB.aluOut =
-  //stages.WB.regRD =
-  //stages.WB.wd =
-  //stages.WB.wn =
-  //stages.WB.regWrite =  
 
 
 
 }
-void print_results() {
 
+
+void printIF(struct Pipe p){
+    printf("IF/ID(pc4,ins)\t\t\t%x\t%x\t\n",p.IF.pc4,p.IF.ins);
+}
+
+void printID(struct Pipe p){
+    printf("ID/EX(pc4,rd1,rd2,extend,rt,rd,ctrl)\t\t\t%d\t%d\t%d\t%d\t%d\t%d\t%d\n",p.ID.pc4,p.ID.decRD1,p.ID.decRD2,p.ID.extend,p.ID.rt,p.ID.rd,p.ID.active_signals);
+    
+}
+
+void printEX(struct Pipe p){
+    printf("EX/MEM(btgt,zero,ALUOut,rd2,RegRd,ctrl)\t\t\t%d\t%d\t%d\t%d\t%d\t%d\n",p.EX.btgt,p.EX.zero,p.EX.ALUout,p.EX.rd2,p.EX.regRd,p.EX.active_signals);
+}
+
+void printMEM(struct Pipe p){
+    printf("MEM/WB(memout,ALUOut,RegRd,ctrl)\t\t\t%d\t%d\t%d\t%d\n",p.MEM.memout,p.MEM.memALUout,p.MEM.regRd,p.MEM.active_signals);
+}   
+
+void printWB(struct Pipe p){
+    printf("WB(aluOut,regRd,wd,wn,regWrite)\t\t\t");
+}
+
+
+void print_results(struct Pipe p) {
+    printf("PC=%d\n",PC);
+    printIF(p);
+    printID(p);
+    printEX(p);
+    printMEM(p);
+    //printWB(p);
+    printf("___________________________________________________________________________________________________________________\n\n");
 }
 
 
@@ -278,47 +414,20 @@ int main(int argc, char *argv[]){
     the array and check other stages if we need to do things like writebacks or memory changes */
     
     //will initialize the file pointer
-    initialize("rtype.out");
+    initialize("testdoc.out");
+    PC = 508;
     if(memory[0] ){
-      PC = 128;
+      PC = 512;
     }
-    //here we load our first if instruction into pipe line at PC 0
-    struct decoded_instruction ins = convert(memory[0]);
-    update_pipeline_registers(); //figure out how to store pipeline_stage[i] before declared.
-    while (1) { 
+
+
+    while (PC < 524) { 
         /*Coded so the next instruction read from file is at PC. If PC changes during carryout_operation() or another operation this 
         should be reflected in the next instruction read*/
-        if(PC!=256)
-          next_instruction = memory[PC++];
-        else
-          break;
 
-        //If we go with my structure we may need a 4th function to decode the next instruction and stage it for the queue.
-        struct decoded_instruction ins = convert(next_instruction);
-      
-        //replace pipeline_stages[4] with previous and load new_instruction into pipeline_stages[0]
-        if(PC<5){
-          for(int i=PC;i>=0;i--){
-            if(i == 0)
-              pipeline_stages[0] = ins;
-            else{
-              pipeline_stages[i] = pipeline_stages[i-1];
-            }
-          }
-        }
-        else{
-          for(int i=4;i>=0;i--){
-            if(i == 0)
-              pipeline_stages[0] = ins;
-            else{
-              pipeline_stages[i] = pipeline_stages[i-1];
-            }
-          }
-        }
-    
         carryout_operations();
         update_pipeline_registers(); 
-        print_results();
+        print_results(stages);
         
         /*
         if (IF_inst = 12) cycles_to_halt = 4;
