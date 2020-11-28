@@ -1,0 +1,112 @@
+kcorcoran$od -Ax -x bnop3.out 
+0000000      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000200      0078    2002    0036    2003    5020    0000    5820    0000
+0000210      6020    0000    2020    0043    2822    0043    302a    0062
+0000220      000c    0000    0000    0000    0000    0000    0000    0000
+0000230      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000400
+kcorcoran$od -Ax -x original.out
+0000000      0000    0000    0000    0000    0000    0100    0000    0200
+0000010      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000200      013c    0000    2134    0800    248c    0000    258c    0400
+0000210      8500    2020    013c    0000    2134    0400    84ac    0000
+0000220      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000400
+kcorcoran$od -Ax -x memory.out  
+0000000      0078    0000    0036    0000    0000    0000    0000    0000
+0000010      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000200      0000    2001    5020    0000    5820    0000    0000    8c22
+0000210      0004    8c23    0008    200f    5020    0000    5820    0000
+0000220      0000    ade2    0004    ade3    000c    0000    0000    0000
+0000230      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000400
+kcorcoran$od -Ax -x bne.out     
+0000000      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000200      0005    1400    5020    0000    5820    0000    6020    0000
+0000210      0078    2002    0036    2003    000c    0000    0000    0000
+0000220      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000400
+kcorcoran$od -Ax -x beq.out
+0000000      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000200      0005    1000    5020    0000    5820    0000    6020    0000
+0000210      0078    2002    0036    2003    000c    0000    0000    0000
+0000220      0000    0000    0000    0000    0000    0000    0000    0000
+*
+0000400
+
+original .asm
+.text
+addi $2, $0, 120
+halt
+; total number of cycles = 5
+; $2=120
+
+bnop3.asm
+.text
+addi $2, $0, 120 ; first operand
+addi $3, $0, 54 ; second operand
+add $10, $0, $0 ; nop – this is needed to avoid data hazard on $3
+add $11, $0, $0 ; nop
+add $12, $0, $0 ; nop
+add $4, $2, $3 ; add, 174
+sub $5, $2, $3 ; sub, 66
+slt $6, $3, $2 ; slt, 1
+halt
+; total number of cycles = 12
+; $2=120, $3=54, $4=174, $5=66, and $6=1
+
+mem.asm
+.data
+operand: .word 120, 54
+result: .space 4
+.text
+addi $1, $0, 0 ; la $1, operand
+add $10, $0, $0 ; nop
+add $11, $0, $0 ; nop
+lw $2, 0($1) ; first operand
+lw $3, 4($1) ; second operand
+addi $15, $0, 8 ; la $15, result
+add $10, $0, $0 ; nop
+add $11, $0, $0 ; nop
+sw $2, 0($15) ; save result
+sw $3, 4($15) ; save result
+halt
+; total number of cycles = 14
+; $2=120, $3=54
+; memory=120, 54, 120, 54
+
+beq.asm
+.text
+beq $0, $0, exit
+add $10, $0, $0 ; nop – this is to avoid branch hazard
+add $11, $0, $0 ; nop – three nop’s are required
+add $12, $0, $0 ; nop
+addi $2, $0, 120 ; should not be executed
+addi $3, $0, 54 ; should not be executed
+exit:
+halt
+; total number of cycles = 8
+; $2=0, $3=0
+
+bne.asm
+.text
+bne $0, $0, exit
+add $10, $0, $0 ; nop – this is to avoid branch hazard
+add $11, $0, $0 ; nop – three nop’s are required
+add $12, $0, $0 ; nop
+addi $2, $0, 120 ; should be executed
+addi $3, $0, 54 ; should be executed
+exit:
+halt
+; total number of cycles = 10
+; $2=120, $3=54
+
