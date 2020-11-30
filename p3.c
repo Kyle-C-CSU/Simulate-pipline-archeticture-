@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 //Global Values 
-int reg[32], memory[256], PC = 0;
+int reg[32], memory[256], PC = 0, cycles_to_halt = 1000;
 
 /*After the instrution is decoded it is bundled into a single struct. Struct decoded_Instruction does not need every field to be initialized
 the initialized fields can be infered from the opcode and the offset. */
@@ -74,6 +74,14 @@ struct WriteBack{
   int WDMemOut;
 
 };
+struct signals {
+    int signal_wd;
+    int signal_mem;
+    int signal_EX;
+    int signal_ID;
+    int signal_fetch;
+
+};
 
 struct Pipe{
   struct InsFetch IF;
@@ -112,11 +120,17 @@ void initialize(char *input) {
         exit(2);
     }
   
-    for(int i = 0; i<256;i++){
+    for(int i = 0; i<127;i++){
         fread(&memory[i], sizeof(int), 1, fp);
-        memory[i] = big_end(memory[i]);
-        printf("%d: %x\n",i,memory[i]);
+        //printf("%d: %x\n",i,memory[i]);
     }
+
+    for(int i = 128; i<256;i++){
+        fread(&memory[i], sizeof(int), 1, fp);
+        //memory[i] = big_end(memory[i]);
+        //printf("%d: %x\n",i,memory[i]);
+    }
+    
 
     //Initializing WB to zero
     stages.WB.WDMemOut = 0;
@@ -180,24 +194,24 @@ int getActiveSig(int opcode){
 }
 
 struct decoded_instruction convert(int binary_instruction) {
-    int BigInstruction = big_end(binary_instruction);
+    //int BigInstruction = big_end(binary_instruction);
     struct decoded_instruction new_instruction;
-    new_instruction.opcode = (BigInstruction >> 26) & 0x3F; //this is the mask for the first 5 bits of the instruction
-    new_instruction.signal = getActiveSig(new_instruction.opcode);
+    new_instruction.opcode = (binary_instruction >> 26) & 0x3F; //this is the mask for the first 5 bits of the instruction
+    //new_instruction.signal = getActiveSig(new_instruction.opcode);
 
     if(new_instruction.opcode == 0) {
         //do r-type decode
-        new_instruction.func_code = BigInstruction & 0x3F; //mask for final 6 bits of instruction
-        new_instruction.rs = (BigInstruction >> 21) & 0x1F; //mask for rs section
-        new_instruction.rt  = (BigInstruction >> 16) & 0x1F; //mask for rt section
-        new_instruction.rd = (BigInstruction >> 11) & 0x1F; //mask for rd section
+        new_instruction.func_code = binary_instruction & 0x3F; //mask for final 6 bits of instruction
+        new_instruction.rs = (binary_instruction >> 21) & 0x1F; //mask for rs section
+        new_instruction.rt  = (binary_instruction >> 16) & 0x1F; //mask for rt section
+        new_instruction.rd = (binary_instruction >> 11) & 0x1F; //mask for rd section
         new_instruction.imm = 0; 
         
     } else {
         //do I-type decode
-        new_instruction.rs = (BigInstruction >> 21) & 0x1F; //mask for rs section
-        new_instruction.rt  = (BigInstruction >> 16) & 0x1F; //mask for rt section
-        new_instruction.imm =  (BigInstruction >> 16) & 0xFFFF; //mask for lower 16 bits    
+        new_instruction.rs = (binary_instruction >> 21) & 0x1F; //mask for rs section
+        new_instruction.rt  = (binary_instruction >> 16) & 0x1F; //mask for rt section
+        new_instruction.imm =  binary_instruction & 0xFFFF; //mask for lower 16 bits    
         new_instruction.rd = 0;
 
     }
@@ -219,7 +233,7 @@ void carryout_operations() {
     if(stages.WB.memtoReg==1) {
         //WB data must come from WB_ALUOut
         stages.WB.wn = stages.WB.aluOut;
-        reg[stages.WB.regRd] = stages.WB.aluOut;
+        reg[stages.WB.regRd] = stages.WB.aluOut/4;
         
 
     } else if(stages.WB.memtoReg == 0) {
@@ -234,8 +248,8 @@ void carryout_operations() {
     // (MEM_Branch && MEM_Zero) || (MEM_BranchNE && MEM_Zero)
     stages.MEM.branch = ((stages.MEM.active_signals >> 1) & 1) || ((stages.MEM.active_signals >> 1) & 1);
     stages.MEM.pcSrc = (stages.MEM.branch && stages.MEM.zero);
-    stages.MEM.memRead = (stages.MEM.active_signals >> 5) & 1;
-    stages.MEM.memWrite = (stages.MEM.active_signals >> 6) & 1;
+    stages.MEM.memRead = (stages.MEM.active_signals >> 6) & 1;
+    stages.MEM.memWrite = (stages.MEM.active_signals >> 5) & 1;
     if(stages.MEM.memRead == 1) {
         stages.MEM.memout = memory[stages.MEM.memALUout/4];
     } else if(stages.MEM.memWrite == 1) {
@@ -256,7 +270,7 @@ void carryout_operations() {
 
         stages.EX.regRd = stages.EX.rd;
 
-    } else if(stages.EX.regDst == 1) {
+    } else if(stages.EX.regDst == 0) {
 
         stages.EX.regRd = stages.EX.rt;
     }
@@ -296,15 +310,24 @@ void carryout_operations() {
     /*Instruction Decode phase
     I have opt to do the decode directly in the carryout_operations function. It simply makes the pipeline function much smoother.
     There is only one signal that matters in this stage and it is RegWrite from the WB stage. */
-    struct decoded_instruction decoded_ins = convert(stages.ID.ins);
-    stages.ID.rs = decoded_ins.rs;
-    stages.ID.rt = decoded_ins.rt;
-    stages.ID.rd = decoded_ins.rd;
-    stages.ID.immed = decoded_ins.imm;
-    stages.ID.active_signals = decoded_ins.signal;
-    stages.ID.decRD1 = reg[stages.ID.rs];
-    stages.ID.decRD2 = reg[stages.ID.rt];
-
+    if (stages.IF.ins == 0) {
+        stages.ID.rs = 0;
+        stages.ID.rt = 0;
+        stages.ID.rd = 0;
+        stages.ID.immed = 0;
+        stages.ID.active_signals = 0;
+        stages.ID.decRD1 = 0;
+        stages.ID.decRD2 = 0;
+    } else {
+        struct decoded_instruction decoded_ins = convert(stages.ID.ins);
+        stages.ID.rs = decoded_ins.rs;
+        stages.ID.rt = decoded_ins.rt;
+        stages.ID.rd = decoded_ins.rd;
+        stages.ID.immed = decoded_ins.imm;
+        stages.ID.decRD1 = reg[stages.ID.rs];
+        stages.ID.decRD2 = reg[stages.ID.rt];
+    }
+    
 
 
     /*IF Stage Start
@@ -326,49 +349,86 @@ void carryout_operations() {
 
     }
     stages.IF.ins = memory[stages.IF.pc_next/4];
+    if(stages.IF.ins==0) {
+        stages.IF.active_signals = 0;
+    } else {
+        stages.IF.active_signals = getActiveSig((stages.IF.ins >> 26) & 0x3F);
+    }
+    if(stages.IF.ins==12){
+        cycles_to_halt = 4;
+    }
     PC = PC + 4;
 
 
 }
 
+void update_WD(int memOut, int MemALUout, int regRd, int signals) {
+    stages.WB.WDMemOut = memOut;
+    stages.WB.aluOut = MemALUout;
+    stages.WB.regRd = regRd;
+    stages.WB.active_signals = signals;
+
+}
+
+void update_Mem_P1(int btgt, int zero, int regRD, int memALUout) {  
+    stages.MEM.btgt = btgt;
+    stages.MEM.zero = zero;
+    stages.MEM.regRd = regRD;
+    stages.MEM.memALUout = memALUout;
+
+}
+
+void update_Mem_P2(int WD, int regRD, int active_signals) {
+    stages.MEM.WD = WD;
+    stages.MEM.regRd = regRD;
+    stages.MEM.active_signals = active_signals;
+}
+
+void update_EX(int pc4, int rd1, int rd2, int extend, int rt, int rd, int active_signals) {
+    stages.EX.pc4 = pc4;
+    stages.EX.rd1 = rd1;
+    stages.EX.rd2 = rd2;
+    stages.EX.extend = extend;
+    stages.EX.rt = rt;
+    stages.EX.rd = rd;
+    stages.EX.active_signals = active_signals;
+}
+
+void update_ID(int pc4, int ins, int signals) {
+    stages.ID.pc4 = pc4;
+    stages.ID.ins = ins;
+    stages.ID.active_signals = signals;
+}
 void update_pipeline_registers() {
 
-//WB
-  stages.WB.WDMemOut = stages.MEM.memout;
-  stages.WB.aluOut = stages.MEM.memALUout;
-  stages.WB.regRd = stages.MEM.regRd;
-  stages.WB.active_signals = stages.MEM.active_signals;
+    update_WD(stages.MEM.memout,stages.MEM.memALUout,stages.MEM.regRd,stages.MEM.active_signals);
 
-//MEM
-  stages.MEM.btgt = stages.EX.btgt;
-  stages.MEM.zero = stages.EX.zero;
-  stages.MEM.regRd = stages.EX.regRd;
-  stages.MEM.memALUout = stages.EX.ALUout;
-  stages.MEM.WD = stages.EX.rd2;
-  stages.MEM.regRd = stages.EX.regRd;
-  stages.MEM.active_signals = stages.EX.active_signals;
+//WB
+    update_Mem_P1(stages.EX.btgt,stages.EX.zero,stages.EX.regRd,stages.EX.ALUout);
+
+    update_Mem_P2(stages.EX.rd2,stages.EX.regRd,stages.EX.active_signals);
 
 //EXE
-  stages.EX.pc4 = stages.ID.pc4;
-  stages.EX.rd1 = stages.ID.decRD1;
-  stages.EX.rd2 = stages.ID.decRD2;
-  stages.EX.extend = stages.ID.immed;
-  stages.EX.rt = stages.ID.rd;
-  stages.EX.rd = stages.ID.rd;
-  stages.EX.active_signals = stages.ID.active_signals;
+    update_EX(stages.ID.pc4, stages.ID.decRD1, stages.ID.decRD2, stages.ID.immed, stages.ID.rt, stages.ID.rd, stages.ID.active_signals);
+
 
 //ID
-  stages.ID.pc4 = stages.IF.pc4;
-  stages.ID.ins = stages.IF.ins;
+    update_ID(stages.IF.pc4, stages.IF.ins, stages.IF.active_signals);
+
 
   //IF
-  stages.IF.pc = pipeline_stages[0].pc;
-  stages.IF.pc4 = pipeline_stages[0].pc+1;
+  stages.IF.pc = PC;
 
 
 
 }
+void printmem(struct Pipe p) {
+    printf("Memory %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",memory[0],memory[1],memory[2],memory[3],memory[4],memory[5],memory[6],memory[7],memory[8],memory[9],memory[10],memory[11],memory[12],memory[13],memory[14],memory[15]);
+}
 
+void printReg(struct Pipe p) {
+     printf("RegFile %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d %d\n",reg[1],reg[2],reg[3],reg[4],reg[5],reg[6],reg[7],reg[8],memory[9],memory[10],memory[11],memory[12],memory[13],memory[14],memory[15],memory[16]);
+}
 
 void printIF(struct Pipe p){
     printf("IF/ID(pc4,ins)\t\t\t%x\t%x\t\n",p.IF.pc4,p.IF.ins);
@@ -393,41 +453,49 @@ void printWB(struct Pipe p){
 
 
 void print_results(struct Pipe p) {
+    
     printf("PC=%d\n",PC);
+    printmem(p);
+    printReg(p);
     printIF(p);
     printID(p);
     printEX(p);
     printMEM(p);
     //printWB(p);
     printf("___________________________________________________________________________________________________________________\n\n");
+   //printf("EX: %d\n", stages.EX.active_signals);
+   //printf("ID: %d\n", stages.ID.active_signals);
+   
 }
 
 
 
 int main(int argc, char *argv[]){
-    
     reg[0] = 0;    
-    int cycles_to_halt = 1000; //maximum number of cycles to execute
     int next_instruction;
 
     /*This array will represent our instructions at each stage of the pipeline. We can simply read in the instruction information from
     the array and check other stages if we need to do things like writebacks or memory changes */
     
     //will initialize the file pointer
-    initialize("testdoc.out");
-    PC = 508;
+    initialize("test.out");
+    PC = 512;
+    /*
     if(memory[0] ){
       PC = 512;
     }
+    */
 
+    
 
-    while (PC < 524) { 
+    while (cycles_to_halt > 0) { 
         /*Coded so the next instruction read from file is at PC. If PC changes during carryout_operation() or another operation this 
         should be reflected in the next instruction read*/
 
         carryout_operations();
         update_pipeline_registers(); 
         print_results(stages);
+        cycles_to_halt--;
         
         /*
         if (IF_inst = 12) cycles_to_halt = 4;
